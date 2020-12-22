@@ -26,10 +26,56 @@
 #include "test_catch_tools.hpp"
 #include "catch.hpp"
 #include "ann_test_tools.hpp"
-#include "serialization_catch.hpp"
+#include "serialization.hpp"
 
 using namespace mlpack;
 using namespace mlpack::ann;
+
+// network1 should be allocated with `new`, and trained on some data.
+template<typename MatType = arma::cube, typename ModelType>
+void CheckRNNCopyFunction(ModelType* network1,
+                       MatType& trainData,
+                       MatType& trainLabels,
+                       const size_t maxEpochs)
+{
+  arma::cube predictions1;
+  arma::cube predictions2;
+  ens::StandardSGD opt(0.1, 1, maxEpochs * trainData.n_slices, -100, false);
+
+  network1->Train(trainData, trainLabels, opt);
+  network1->Predict(trainData, predictions1);
+
+  RNN<> network2 = *network1;
+  delete network1;
+
+  // Deallocating all of network1's memory, so that network2 does not use any
+  // of that memory.
+  network2.Predict(trainData, predictions2);
+  CheckMatrices(predictions1, predictions2);
+}
+
+// network1 should be allocated with `new`, and trained on some data.
+template<typename MatType = arma::cube, typename ModelType>
+void CheckRNNMoveFunction(ModelType* network1,
+                       MatType& trainData,
+                       MatType& trainLabels,
+                       const size_t maxEpochs)
+{
+  arma::cube predictions1;
+  arma::cube predictions2;
+  ens::StandardSGD opt(0.1, 1, maxEpochs * trainData.n_slices, -100, false);
+
+  network1->Train(trainData, trainLabels, opt);
+  network1->Predict(trainData, predictions1);
+
+  RNN<> network2(std::move(*network1));
+  delete network1;
+
+  // Deallocating all of network1's memory, so that network2 does not use any
+  // of that memory.
+  network2.Predict(trainData, predictions2);
+  CheckMatrices(predictions1, predictions2);
+}
 
 /**
  * Simple add module test.
@@ -87,11 +133,10 @@ TEST_CASE("GradientAddLayerTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -416,11 +461,10 @@ TEST_CASE("GradientLinearLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -508,13 +552,12 @@ TEST_CASE("GradientLinear3DLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        inSize(4),
+        outSize(1),
+        nPoints(2),
+        batchSize(4)
     {
-      const size_t inSize = 4;
-      const size_t outSize = 1;
-      const size_t nPoints = 2;
-      const size_t batchSize = 4;
-
       input = arma::randu(inSize * nPoints, batchSize);
       target = arma::zeros(outSize * nPoints, batchSize);
       target(0, 0) = 1;
@@ -545,6 +588,10 @@ TEST_CASE("GradientLinear3DLayerTest", "[ANNLayerTest]")
 
     FFN<MeanSquaredError<>, RandomInitialization>* model;
     arma::mat input, target;
+    const size_t inSize;
+    const size_t outSize;
+    const size_t nPoints;
+    const size_t batchSize;
   } function;
 
   REQUIRE(CheckGradient(function) <= 1e-7);
@@ -591,11 +638,10 @@ TEST_CASE("GradientNoisyLinearLayerTest", "[ANNLayerTest]")
   // Noisy linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -695,11 +741,10 @@ TEST_CASE("GradientLinearNoBiasLayerTest", "[ANNLayerTest]")
   // LinearNoBias function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -797,11 +842,10 @@ TEST_CASE("GradientFlexibleReLULayerTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(2, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(2, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, RandomInitialization>(
           NegativeLogLikelihood<>(), RandomInitialization(0.1, 0.5));
 
@@ -1017,10 +1061,10 @@ TEST_CASE("GradientLSTMLayerTest", "[ANNLayerTest]")
   // LSTM function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(1, 1, 5)),
+        target(arma::ones(1, 1, 5))
     {
-      input = arma::randu(1, 1, 5);
-      target.ones(1, 1, 5);
       const size_t rho = 5;
 
       model = new RNN<NegativeLogLikelihood<> >(rho);
@@ -1122,10 +1166,10 @@ TEST_CASE("GradientFastLSTMLayerTest", "[ANNLayerTest]")
   // Fast LSTM function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(1, 1, 5)),
+        target(arma::ones(1, 1, 5))
     {
-      input = arma::randu(1, 1, 5);
-      target = arma::ones(1, 1, 5);
       const size_t rho = 5;
 
       model = new RNN<NegativeLogLikelihood<> >(rho);
@@ -1183,6 +1227,74 @@ TEST_CASE("FastLSTMLayerParametersTest", "[ANNLayerTest]")
   REQUIRE(layer1.InSize() == layer2.InSize());
   REQUIRE(layer1.OutSize() == layer2.OutSize());
   REQUIRE(layer1.Rho() == layer2.Rho());
+}
+
+/**
+ * Check whether copying and moving network with FastLSTM is working or not.
+ */
+TEST_CASE("CheckCopyMoveFastLSTMTest", "[ANNLayerTest]")
+{
+  arma::cube input = arma::randu(1, 1, 5);
+  arma::cube target = arma::ones(1, 1, 5);
+  const size_t rho = 5;
+
+  RNN<NegativeLogLikelihood<> > *model1 =
+      new RNN<NegativeLogLikelihood<> >(rho);
+  model1->Predictors() = input;
+  model1->Responses() = target;
+  model1->Add<IdentityLayer<> >();
+  model1->Add<Linear<> >(1, 10);
+  model1->Add<FastLSTM<> >(10, 3, rho);
+  model1->Add<LogSoftMax<> >();
+
+  RNN<NegativeLogLikelihood<> > *model2 =
+     new RNN<NegativeLogLikelihood<> >(rho);
+  model2->Predictors() = input;
+  model2->Responses() = target;
+  model2->Add<IdentityLayer<> >();
+  model2->Add<Linear<> >(1, 10);
+  model2->Add<FastLSTM<> >(10, 3, rho);
+  model2->Add<LogSoftMax<> >();
+
+  // Check whether copy constructor is working or not.
+  CheckRNNCopyFunction<>(model1, input, target, 1);
+
+  // Check whether move constructor is working or not.
+  CheckRNNMoveFunction<>(model2, input, target, 1);
+}
+
+/**
+ * Check whether copying and moving network with LSTM is working or not.
+ */
+TEST_CASE("CheckCopyMoveLSTMTest", "[ANNLayerTest]")
+{
+  arma::cube input = arma::randu(1, 1, 5);
+  arma::cube target = arma::ones(1, 1, 5);
+  const size_t rho = 5;
+
+  RNN<NegativeLogLikelihood<> > *model1 =
+      new RNN<NegativeLogLikelihood<> >(rho);
+  model1->Predictors() = input;
+  model1->Responses() = target;
+  model1->Add<IdentityLayer<> >();
+  model1->Add<Linear<> >(1, 10);
+  model1->Add<LSTM<> >(10, 3, rho);
+  model1->Add<LogSoftMax<> >();
+
+  RNN<NegativeLogLikelihood<> > *model2 =
+     new RNN<NegativeLogLikelihood<> >(rho);
+  model2->Predictors() = input;
+  model2->Responses() = target;
+  model2->Add<IdentityLayer<> >();
+  model2->Add<Linear<> >(1, 10);
+  model2->Add<LSTM<> >(10, 3, rho);
+  model2->Add<LogSoftMax<> >();
+
+  // Check whether copy constructor is working or not.
+  CheckRNNCopyFunction<>(model1, input, target, 1);
+
+  // Check whether move constructor is working or not.
+  CheckRNNMoveFunction<>(model2, input, target, 1);
 }
 
 /**
@@ -1391,10 +1503,10 @@ TEST_CASE("GradientGRULayerTest", "[ANNLayerTest]")
   // GRU function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(1, 1, 5)),
+        target(arma::ones(1, 1, 5))
     {
-      input = arma::randu(1, 1, 5);
-      target = arma::ones(1, 1, 5);
       const size_t rho = 5;
 
       model = new RNN<NegativeLogLikelihood<> >(rho);
@@ -1631,11 +1743,10 @@ TEST_CASE("GradientConcatLayerTest", "[ANNLayerTest]")
   // Concat function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -1700,11 +1811,10 @@ TEST_CASE("GradientConcatenateLayerTest", "[ANNLayerTest]")
   // Concatenate function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -1905,11 +2015,10 @@ TEST_CASE("GradientSoftmaxTest", "[ANNLayerTest]")
   // Softmax function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1; 0"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1; 0");
-
       model = new FFN<MeanSquaredError<>, RandomInitialization>;
       model->Predictors() = input;
       model->Responses() = target;
@@ -2109,12 +2218,10 @@ TEST_CASE("GradientBatchNormTest", "[ANNLayerTest]")
     // Add function gradient instantiation.
     struct GradientFunction
     {
-      GradientFunction()
+      GradientFunction() :
+          input(arma::randn(32, 2048)),
+          target(arma::ones(1, 2048))
       {
-        input = arma::randn(32, 2048);
-        arma::mat target;
-        target.ones(1, 2048);
-
         model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
         model->Predictors() = input;
         model->Responses() = target;
@@ -2184,12 +2291,11 @@ TEST_CASE("GradientVirtualBatchNormTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randn(5, 256)),
+        target(arma::ones(1, 256))
     {
-      input = arma::randn(5, 256);
       arma::mat referenceBatch = arma::mat(input.memptr(), input.n_rows, 16);
-      arma::mat target;
-      target.ones(1, 256);
 
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
@@ -2247,12 +2353,10 @@ TEST_CASE("MiniBatchDiscriminationTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randn(5, 4)),
+        target(arma::ones(1, 4))
     {
-      input = arma::randn(5, 4);
-      arma::mat target;
-      target.ones(1, 4);
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -2427,11 +2531,10 @@ TEST_CASE("GradientTransposedConvolutionLayerTest", "[ANNLayerTest]")
   {
     struct GradientFunction
     {
-      GradientFunction()
+      GradientFunction() :
+          input(arma::linspace<arma::colvec>(0, 35, 36)),
+          target(arma::mat("1"))
       {
-        input = arma::linspace<arma::colvec>(0, 35, 36);
-        target = arma::mat("1");
-
         model = new FFN<NegativeLogLikelihood<>, RandomInitialization>();
         model->Predictors() = input;
         model->Responses() = target;
@@ -2544,11 +2647,10 @@ TEST_CASE("GradientAtrousConvolutionLayerTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::linspace<arma::colvec>(0, 35, 36)),
+        target(arma::mat("1"))
     {
-      input = arma::linspace<arma::colvec>(0, 35, 36);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, RandomInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -2575,7 +2677,7 @@ TEST_CASE("GradientAtrousConvolutionLayerTest", "[ANNLayerTest]")
     arma::mat input, target;
   } function;
 
-  // TODO: this tolerance seems far higher than necessary.  The implementation
+  // TODO: this tolerance seems far higher than necessary. The implementation
   // should be checked.
   REQUIRE(CheckGradient(function) <= 0.2);
 }
@@ -2726,12 +2828,10 @@ TEST_CASE("GradientLayerNormTest", "[ANNLayerTest]")
   // Add function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randn(10, 256)),
+        target(arma::ones(1, 256))
     {
-      input = arma::randn(10, 256);
-      arma::mat target;
-      target.ones(1, 256);
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3048,11 +3148,10 @@ TEST_CASE("GradientReparametrizationLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3092,11 +3191,10 @@ TEST_CASE("GradientReparametrizationLayerBetaTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 2)),
+        target(arma::mat("1 1"))
     {
-      input = arma::randu(10, 2);
-      target = arma::mat("1 1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3248,11 +3346,10 @@ TEST_CASE("GradientHighwayLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(5, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(5, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3300,11 +3397,10 @@ TEST_CASE("GradientSequentialLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3351,11 +3447,10 @@ TEST_CASE("GradientWeightNormLayerTest", "[ANNLayerTest]")
   // Linear function gradient instantiation.
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        input(arma::randu(10, 1)),
+        target(arma::mat("1"))
     {
-      input = arma::randu(10, 1);
-      target = arma::mat("1");
-
       model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
       model->Predictors() = input;
       model->Responses() = target;
@@ -3438,20 +3533,20 @@ void ANNLayerSerializationTest(LayerType& layer)
   model.Predict(input, originalOutput);
 
   // Now serialize the model.
-  FFN<NegativeLogLikelihood<>, ann::RandomInitialization> xmlModel, textModel,
+  FFN<NegativeLogLikelihood<>, ann::RandomInitialization> xmlModel, jsonModel,
       binaryModel;
-  SerializeObjectAll(model, xmlModel, textModel, binaryModel);
+  SerializeObjectAll(model, xmlModel, jsonModel, binaryModel);
 
   // Ensure that predictions are the same.
-  arma::mat modelOutput, xmlOutput, textOutput, binaryOutput;
+  arma::mat modelOutput, xmlOutput, jsonOutput, binaryOutput;
   model.Predict(input, modelOutput);
   xmlModel.Predict(input, xmlOutput);
-  textModel.Predict(input, textOutput);
+  jsonModel.Predict(input, jsonOutput);
   binaryModel.Predict(input, binaryOutput);
 
   CheckMatrices(originalOutput, modelOutput, 1e-5);
   CheckMatrices(originalOutput, xmlOutput, 1e-5);
-  CheckMatrices(originalOutput, textOutput, 1e-5);
+  CheckMatrices(originalOutput, jsonOutput, 1e-5);
   CheckMatrices(originalOutput, binaryOutput, 1e-5);
 }
 
@@ -4185,12 +4280,10 @@ TEST_CASE("GradientBatchNormWithMiniBatchesTest", "[ANNLayerTest]")
   {
     struct GradientFunction
     {
-      GradientFunction()
+      GradientFunction() :
+          input(arma::randn(16, 1024)),
+          target(arma::ones(1, 1024))
       {
-        input = arma::randn(16, 1024);
-        arma::mat target;
-        target.ones(1, 1024);
-
         model = new FFN<NegativeLogLikelihood<>, NguyenWidrowInitialization>();
         model->Predictors() = input;
         model->Responses() = target;
@@ -4683,7 +4776,13 @@ TEST_CASE("GradientMultiheadAttentionTest", "[ANNLayerTest]")
 {
   struct GradientFunction
   {
-    GradientFunction()
+    GradientFunction() :
+        tgtSeqLen(2),
+        srcSeqLen(2),
+        embedDim(4),
+        nHeads(2),
+        vocabSize(5),
+        batchSize(2)
     {
       input = arma::randu(embedDim * (tgtSeqLen + 2 * srcSeqLen), batchSize);
       target = arma::zeros(vocabSize, batchSize);
@@ -4736,13 +4835,13 @@ TEST_CASE("GradientMultiheadAttentionTest", "[ANNLayerTest]")
     MultiheadAttention<>* attnModule;
 
     arma::mat input, target, attnMask, keyPaddingMask;
-    const size_t tgtSeqLen = 2;
-    const size_t srcSeqLen = 2;
-    const size_t embedDim = 4;
-    const size_t nHeads = 2;
-    const size_t vocabSize = 5;
-    const size_t batchSize = 2;
+    const size_t tgtSeqLen;
+    const size_t srcSeqLen;
+    const size_t embedDim;
+    const size_t nHeads;
+    const size_t vocabSize;
+    const size_t batchSize;
   } function;
 
-  REQUIRE(CheckGradient(function) <= 2e-06);
+  REQUIRE(CheckGradient(function) <= 3e-06);
 }

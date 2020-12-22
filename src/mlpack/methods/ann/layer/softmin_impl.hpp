@@ -29,11 +29,10 @@ template<typename InputType, typename OutputType>
 void Softmin<InputDataType, OutputDataType>::Forward(
     const InputType& input,
     OutputType& output)
-{ 
-  InputType inputMin = arma::repmat(arma::min(input,0), input.n_rows, 1);
-  output = arma::repmat(arma::log(arma::sum(
-      arma::exp(-(input - inputMin)),0)), input.n_rows, 1);
-  output = arma::exp(-(input - inputMin) - output);
+{
+  InputType softminInput = arma::exp(-(input.each_row() -
+      arma::min(input, 0)));
+  output = softminInput.each_row() / sum(softminInput, 0);
 }
 
 template<typename InputDataType, typename OutputDataType>
@@ -50,11 +49,11 @@ template<typename InputDataType, typename OutputDataType>
 template<typename Archive>
 void Softmin<InputDataType, OutputDataType>::serialize(
     Archive& /* ar */,
-    const unsigned int /* version */)
+    const uint32_t /* version */)
 {
   // Nothing to do here.
 }
-                                             
+
 } // namespace ann
 } // namespace mlpack
 
